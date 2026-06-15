@@ -16,8 +16,10 @@
     "jszip": "^3.10.1",
     "next": "latest",
     "openai": "latest",
+    "pdfjs-dist": "^5.4.296",
     "react": "latest",
     "react-dom": "latest",
+    "tesseract.js": "^6.0.1",
     "typescript": "latest",
     "zod": "^3.25.0"
   },
