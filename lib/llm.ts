@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import { zodResponseFormat } from "openai/helpers/zod";
 import { ANALYZE_PROMPT, GENERATE_PROMPT, VERIFY_PROMPT } from "./prompts";
 import {
   GeneratedProblemSchema,
@@ -15,50 +14,65 @@ function client() {
 }
 
 function model() {
-  return process.env.OPENAI_MODEL || "gpt-5.5";
+  return process.env.OPENAI_MODEL || "gpt-4.1-mini";
+}
+
+async function callJson<T>({
+  system,
+  user,
+  schema,
+  errorMessage
+}: {
+  system: string;
+  user: string;
+  schema: { parse: (value: unknown) => T };
+  errorMessage: string;
+}): Promise<T> {
+  const completion = await client().chat.completions.create({
+    model: model(),
+    messages: [
+      { role: "system", content: `${system}\n\n반드시 유효한 JSON 객체만 출력하라. 마크다운 코드블록, 설명문, 주석은 출력하지 마라.` },
+      { role: "user", content: user }
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0.3
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error(errorMessage);
+
+  try {
+    return schema.parse(JSON.parse(content));
+  } catch (error) {
+    console.error("LLM JSON parse/validation error:", error);
+    console.error("Raw LLM content:", content);
+    throw new Error(errorMessage);
+  }
 }
 
 export async function analyzeProblem({ problemText, imageContext }: { problemText: string; imageContext?: string }): Promise<ProblemAnalysis> {
-  const completion = await client().beta.chat.completions.parse({
-    model: model(),
-    messages: [
-      { role: "system", content: ANALYZE_PROMPT },
-      { role: "user", content: `입력 문제:\n${problemText}\n\n이미지 설명/OCR:\n${imageContext ?? ""}` }
-    ],
-    response_format: zodResponseFormat(ProblemAnalysisSchema, "problem_analysis")
+  return callJson({
+    system: ANALYZE_PROMPT,
+    user: `입력 문제:\n${problemText}\n\n이미지 설명/OCR:\n${imageContext ?? ""}`,
+    schema: ProblemAnalysisSchema,
+    errorMessage: "문제 분석 결과 파싱 실패"
   });
-
-  const parsed = completion.choices[0]?.message.parsed;
-  if (!parsed) throw new Error("문제 분석 결과 파싱 실패");
-  return parsed;
 }
 
 export async function generateVariant(analysis: ProblemAnalysis): Promise<GeneratedProblem> {
-  const completion = await client().beta.chat.completions.parse({
-    model: model(),
-    messages: [
-      { role: "system", content: GENERATE_PROMPT },
-      { role: "user", content: `분석 JSON:\n${JSON.stringify(analysis, null, 2)}` }
-    ],
-    response_format: zodResponseFormat(GeneratedProblemSchema, "generated_problem")
+  return callJson({
+    system: GENERATE_PROMPT,
+    user: `분석 JSON:\n${JSON.stringify(analysis, null, 2)}`,
+    schema: GeneratedProblemSchema,
+    errorMessage: "문항 생성 결과 파싱 실패"
   });
-
-  const parsed = completion.choices[0]?.message.parsed;
-  if (!parsed) throw new Error("문항 생성 결과 파싱 실패");
-  return parsed;
 }
 
 export async function verifyProblem({ analysis, generated }: { analysis: ProblemAnalysis; generated: GeneratedProblem }): Promise<Verification> {
-  const completion = await client().beta.chat.completions.parse({
-    model: model(),
-    messages: [
-      { role: "system", content: VERIFY_PROMPT },
-      { role: "user", content: `원문 분석 JSON:\n${JSON.stringify(analysis, null, 2)}\n\n생성 문제 JSON:\n${JSON.stringify(generated, null, 2)}` }
-    ],
-    response_format: zodResponseFormat(VerificationSchema, "verification")
+  return callJson({
+    system: VERIFY_PROMPT,
+    user: `원문 분석 JSON:\n${JSON.stringify(analysis, null, 2)}\n\n생성 문제 JSON:\n${JSON.stringify(generated, null, 2)}`,
+    schema: VerificationSchema,
+    errorMessage: "검증 결과 파싱 실패"
   });
-
-  const parsed = completion.choices[0]?.message.parsed;
-  if (!parsed) throw new Error("검증 결과 파싱 실패");
-  return parsed;
 }
