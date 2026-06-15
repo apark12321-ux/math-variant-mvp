@@ -5,8 +5,10 @@ import { useEffect, useState } from "react";
 type ApiResult = {
   success: boolean;
   mode?: "local" | "api";
+  stage?: "extracted" | "generated";
   message?: string;
   extractedText?: string;
+  extractionWarning?: string;
   analysis?: any;
   generated?: any;
   verification?: any;
@@ -38,9 +40,11 @@ function formatBytes(size: number) {
 export default function Home() {
   const [problemText, setProblemText] = useState(sample);
   const [imageContext, setImageContext] = useState("");
+  const [confirmedText, setConfirmedText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<FilePreview | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<ApiResult | null>(null);
 
   useEffect(() => {
@@ -58,42 +62,82 @@ export default function Home() {
   function onFileChange(selected: File | null) {
     setFile(selected);
     setResult(null);
+    setConfirmedText("");
   }
 
-  async function submit() {
-    setLoading(true);
+  function buildFormData(action: "extract" | "generate", text: string) {
+    const formData = new FormData();
+    formData.append("action", action);
+    formData.append("problemText", text);
+    formData.append("imageContext", imageContext);
+    formData.append("maxAttempts", "3");
+    if (action === "extract" && file) formData.append("file", file);
+    return formData;
+  }
+
+  async function requestApi(formData: FormData) {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      body: formData
+    });
+    return res.json() as Promise<ApiResult>;
+  }
+
+  async function extractAndConfirm() {
+    setExtracting(true);
     setResult(null);
+    setConfirmedText("");
 
     try {
-      const formData = new FormData();
-      formData.append("problemText", problemText);
-      formData.append("imageContext", imageContext);
-      formData.append("maxAttempts", "3");
-      if (file) formData.append("file", file);
+      const json = await requestApi(buildFormData("extract", problemText));
+      setResult(json);
+      if (json.success && json.extractedText) {
+        setConfirmedText(json.extractedText);
+      }
+    } catch (err) {
+      setResult({ success: false, stage: "extracted", message: err instanceof Error ? err.message : "파일 인식 요청 실패" });
+    } finally {
+      setExtracting(false);
+    }
+  }
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        body: formData
-      });
-      const json = await res.json();
+  async function generateFromConfirmed() {
+    const sourceText = confirmedText.trim();
+    if (!sourceText) {
+      setResult({ success: false, message: "확정된 문제 텍스트가 없습니다. 먼저 파일 인식 결과를 확인해 주세요." });
+      return;
+    }
+
+    setGenerating(true);
+
+    try {
+      const json = await requestApi(buildFormData("generate", sourceText));
       setResult(json);
     } catch (err) {
-      setResult({ success: false, message: err instanceof Error ? err.message : "요청 실패" });
+      setResult({ success: false, stage: "generated", message: err instanceof Error ? err.message : "문항 생성 요청 실패" });
     } finally {
-      setLoading(false);
+      setGenerating(false);
     }
   }
 
   const generated = result?.generated?.new_problem;
+  const busy = extracting || generating;
 
   return (
     <main>
       <div className="version-banner">
-        무료 로컬 모드 기본 적용 · 파일 업로드 즉시 미리보기 · JPG/PNG/WEBP/PDF/HWPX/HWP 지원
+        2단계 실행 흐름 적용 · 원본 미리보기 → 파일 인식 → 인식 결과 수정·확정 → 문항 생성
       </div>
 
       <h1>수학 유사문항 생성 MVP</h1>
-      <p>파일을 업로드하면 먼저 화면에서 원본을 확인한 뒤 문항 생성을 실행합니다. 이미지와 PDF는 미리보기로 확인하고, HWPX/HWP는 파일 정보와 생성 후 추출 텍스트를 확인합니다.</p>
+      <p>파일을 업로드하면 먼저 원본을 확인하고, 파일 인식 결과를 수정·확정한 다음 그 텍스트로 유사문항을 생성합니다.</p>
+
+      <div className="step-panel">
+        <span className="badge">1 원본 업로드</span>
+        <span className="badge">2 인식 결과 확인</span>
+        <span className="badge">3 텍스트 수정·확정</span>
+        <span className="badge">4 유사문항 생성</span>
+      </div>
 
       <div className="grid">
         <section className="card">
@@ -126,7 +170,7 @@ export default function Home() {
               {preview.kind === "document" && (
                 <div className="document-preview">
                   <strong>문서 파일이 선택되었습니다.</strong>
-                  <p>HWPX/HWP는 브라우저에서 원본 화면을 직접 렌더링하기 어렵습니다. 생성 버튼을 누르면 서버가 문서 텍스트를 추출하고, 오른쪽 결과 영역의 “파일 인식 결과”에 먼저 보여줍니다.</p>
+                  <p>HWPX/HWP는 원본 레이아웃 대신 텍스트 추출 결과를 확인합니다. 아래 1단계 버튼을 눌러 인식 결과를 먼저 확인하세요.</p>
                 </div>
               )}
 
@@ -139,7 +183,7 @@ export default function Home() {
             </div>
           )}
 
-          <label>입력 문제 텍스트</label>
+          <label>보조 입력 문제 텍스트</label>
           <textarea
             value={problemText}
             onChange={(e) => setProblemText(e.target.value)}
@@ -154,16 +198,34 @@ export default function Home() {
             style={{ minHeight: 120 }}
           />
 
-          <button onClick={submit} disabled={loading}>{loading ? "처리 중..." : "문항 생성"}</button>
+          <button onClick={extractAndConfirm} disabled={busy}>
+            {extracting ? "파일 인식 중..." : "1단계: 파일 인식 결과 확인"}
+          </button>
         </section>
 
         <section className="card">
-          <h2>생성 결과</h2>
-          {!result && <p>문제 파일을 업로드하면 왼쪽에서 원본을 먼저 확인할 수 있습니다. 확인 후 문항 생성 버튼을 누르세요.</p>}
+          <h2>파일 인식 및 생성 실행</h2>
+          {!result && <p>먼저 왼쪽에서 파일을 업로드하거나 문제 텍스트를 입력한 뒤, 1단계 버튼으로 인식 결과를 확인하세요.</p>}
           {result?.message && <p className={result.success ? "ok" : "error"}>{result.message}</p>}
           {result?.mode && <p className="badge">실행 모드: {result.mode === "local" ? "무료 로컬 모드" : "API 모드"}</p>}
+          {result?.extractionWarning && <p className="hint">주의: {result.extractionWarning}</p>}
 
-          {result?.extractedText && (
+          {result?.stage === "extracted" && (
+            <div className="result-section">
+              <h3>파일 인식 결과 확인·수정</h3>
+              <p className="hint">아래 텍스트를 실제 문제와 맞게 수정한 뒤 2단계 버튼을 누르세요. 이 텍스트가 최종 생성 기준이 됩니다.</p>
+              <textarea
+                value={confirmedText}
+                onChange={(e) => setConfirmedText(e.target.value)}
+                className="confirmed-textarea"
+              />
+              <button onClick={generateFromConfirmed} disabled={busy || !confirmedText.trim()}>
+                {generating ? "문항 생성 중..." : "2단계: 이 텍스트로 유사문항 생성"}
+              </button>
+            </div>
+          )}
+
+          {result?.extractedText && result.stage !== "extracted" && (
             <div className="result-section">
               <h3>파일 인식 결과</h3>
               <pre>{result.extractedText}</pre>
