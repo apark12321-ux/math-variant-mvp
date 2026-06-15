@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractTextFromOfficeDocument } from "../../../lib/documentText";
 import { analyzeProblem, extractProblemFromFile, generateVariant, verifyProblem, type UploadedProblemFile } from "../../../lib/llm";
+import { generateLocalVariant } from "../../../lib/localGenerator";
 import { renderDiagramSvg } from "../../../lib/renderer";
 import { surfaceSimilarityRisk } from "../../../lib/similarity";
 
@@ -95,16 +96,42 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
   };
 }
 
+function buildLocalText(parsed: ParsedRequest) {
+  const parts = [parsed.problemText, parsed.imageContext, parsed.file?.extractedText].filter(Boolean);
+  return parts.join("\n\n").trim();
+}
+
+function localResponse(problemText: string, extractedText = "") {
+  const local = generateLocalVariant(problemText);
+  return NextResponse.json({
+    success: true,
+    mode: "local",
+    message: "로컬 규칙 기반 무료 모드로 생성했습니다. 복잡한 문항은 품질이 낮을 수 있습니다.",
+    extractedText,
+    analysis: local.analysis,
+    generated: local.generated,
+    verification: local.verification,
+    diagramSvg: renderDiagramSvg(local.generated.diagram_spec),
+    attempts: [{ index: 1, valid: true, localSimilarityRisk: "medium", modelSimilarityRisk: "medium", verification: local.verification }]
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const parsed = await parseRequest(req);
+    const apiEnabled = process.env.USE_OPENAI === "true" && !!process.env.OPENAI_API_KEY;
+
+    if (!apiEnabled) {
+      const localText = buildLocalText(parsed);
+      if (!localText) {
+        return NextResponse.json({ success: false, message: "무료 모드에서는 텍스트 입력 또는 HWPX/HWP 추출 텍스트가 필요합니다. 이미지/PDF OCR은 API 모드에서 처리됩니다." }, { status: 400 });
+      }
+      return localResponse(localText, parsed.file?.extractedText ?? "");
+    }
+
     let problemText = parsed.problemText;
     let imageContext = parsed.imageContext;
     let extractedText = "";
-
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ success: false, message: "OPENAI_API_KEY가 설정되지 않았습니다." }, { status: 500 });
-    }
 
     if (parsed.file) {
       extractedText = await extractProblemFromFile(parsed.file);
@@ -130,7 +157,7 @@ export async function POST(req: Request) {
       attempts.push({ index: i + 1, valid, localSimilarityRisk, modelSimilarityRisk: generated.similarity_check.surface_similarity_risk, verification });
 
       if (valid) {
-        return NextResponse.json({ success: true, extractedText, analysis, generated, verification, diagramSvg: renderDiagramSvg(generated.diagram_spec), attempts });
+        return NextResponse.json({ success: true, mode: "api", extractedText, analysis, generated, verification, diagramSvg: renderDiagramSvg(generated.diagram_spec), attempts });
       }
     }
 
