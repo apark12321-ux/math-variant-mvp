@@ -5,6 +5,7 @@ import { useState } from "react";
 type ApiResult = {
   success: boolean;
   message?: string;
+  extractedText?: string;
   analysis?: any;
   generated?: any;
   verification?: any;
@@ -17,6 +18,7 @@ const sample = `한 변의 길이가 6cm인 정사각형의 넓이를 구하시�
 export default function Home() {
   const [problemText, setProblemText] = useState(sample);
   const [imageContext, setImageContext] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ApiResult | null>(null);
 
@@ -25,10 +27,15 @@ export default function Home() {
     setResult(null);
 
     try {
+      const formData = new FormData();
+      formData.append("problemText", problemText);
+      formData.append("imageContext", imageContext);
+      formData.append("maxAttempts", "3");
+      if (file) formData.append("file", file);
+
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problemText, imageContext, maxAttempts: 3 })
+        body: formData
       });
       const json = await res.json();
       setResult(json);
@@ -44,14 +51,27 @@ export default function Home() {
   return (
     <main>
       <h1>수학 유사문항 생성 MVP</h1>
-      <p>초·중·고 수학 문제를 입력하면 교육과정·개념·풀이 구조를 분석하고 새 문항과 해설을 생성합니다.</p>
+      <p>문제 텍스트, 이미지 캡처, 스캔 이미지, PDF를 입력하면 OCR·시각 인식 후 새 문항과 해설을 생성합니다.</p>
 
       <div className="grid">
         <section className="card">
-          <label>입력 문제</label>
-          <textarea value={problemText} onChange={(e) => setProblemText(e.target.value)} />
+          <label>문제 파일 업로드</label>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,application/pdf,.png,.jpg,.jpeg,.webp,.pdf"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+          <p className="hint">지원: JPG, PNG, WEBP, PDF. 한 번에 한 문제가 보이는 선명한 파일을 권장합니다. MVP 기준 10MB 이하.</p>
+          {file && <p className="ok">선택됨: {file.name} / {(file.size / 1024 / 1024).toFixed(2)}MB</p>}
 
-          <label>이미지 설명/OCR 선택 입력</label>
+          <label>입력 문제 텍스트</label>
+          <textarea
+            value={problemText}
+            onChange={(e) => setProblemText(e.target.value)}
+            placeholder="파일만 업로드해도 됩니다. 텍스트를 함께 입력하면 보정 정보로 사용됩니다."
+          />
+
+          <label>도형/이미지 보충 설명</label>
           <textarea
             value={imageContext}
             onChange={(e) => setImageContext(e.target.value)}
@@ -59,13 +79,20 @@ export default function Home() {
             style={{ minHeight: 120 }}
           />
 
-          <button onClick={submit} disabled={loading}>{loading ? "생성·검증 중..." : "문항 생성"}</button>
+          <button onClick={submit} disabled={loading}>{loading ? "파일 인식·생성·검증 중..." : "문항 생성"}</button>
         </section>
 
         <section className="card">
           <h2>생성 결과</h2>
-          {!result && <p>문제를 입력하고 생성 버튼을 누르세요.</p>}
+          {!result && <p>문제 텍스트를 입력하거나 파일을 업로드한 뒤 생성 버튼을 누르세요.</p>}
           {result && !result.success && <p className="error">{result.message ?? "생성 실패"}</p>}
+
+          {result?.extractedText && (
+            <div className="result-section">
+              <h3>파일 인식 결과</h3>
+              <pre>{result.extractedText}</pre>
+            </div>
+          )}
 
           {generated && (
             <>
