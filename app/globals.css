@@ -7,6 +7,7 @@
   --accent: #7aa2ff;
   --danger: #ff8a8a;
   --ok: #8affc1;
+  --warn: #ffd27a;
 }
 * { box-sizing: border-box; }
 body {
@@ -27,15 +28,20 @@ label { display: block; margin: 14px 0 8px; font-weight: 700; color: #dbe4ff; }
 button { margin-top: 16px; width: 100%; border: 0; border-radius: 12px; padding: 14px 18px; background: linear-gradient(135deg, #7aa2ff, #a67aff); color: white; font-weight: 800; cursor: pointer; font-size: 16px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
 pre { white-space: pre-wrap; word-break: break-word; background: #080d1c; border: 1px solid var(--line); border-radius: 12px; padding: 14px; color: #dbe4ff; line-height: 1.5; }
+ul { color: var(--muted); line-height: 1.7; }
 .badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); color: #dbe4ff; border-radius: 999px; padding: 6px 10px; margin: 4px 6px 4px 0; font-size: 13px; }
 .result-section { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
 .diagram svg { max-width: 100%; height: auto; background: white; border-radius: 12px; }
-.error { color: var(--danger); }
-.ok { color: var(--ok); }
+.error { color: var(--danger); font-weight: 700; }
+.ok { color: var(--ok); font-weight: 700; }
 .hint { margin-top: 8px; font-size: 13px; color: var(--muted); }
 .version-banner { border: 1px solid rgba(122,162,255,.5); background: rgba(122,162,255,.12); color: #dbe4ff; border-radius: 999px; display: inline-flex; padding: 8px 14px; margin-bottom: 18px; font-size: 13px; font-weight: 700; }
 .step-panel { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 20px; padding: 12px; border: 1px solid rgba(122,162,255,.28); background: rgba(8,13,28,.52); border-radius: 16px; }
+.status-panel { margin: 16px 0 20px; padding: 16px; border-radius: 16px; border: 1px solid rgba(255,210,122,.42); background: rgba(255,210,122,.09); }
+.status-panel strong { color: var(--warn); }
+.status-panel p { margin: 6px 0 0; }
 .confirmed-textarea { min-height: 260px; border-color: rgba(138,255,193,.5); }
+.blocked { border: 1px solid rgba(255,138,138,.45); background: rgba(255,138,138,.08); border-radius: 14px; padding: 16px; }
 .upload-preview { border-top-style: dashed; }
 .preview-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
 .preview-header h3 { margin: 0 0 4px; }
