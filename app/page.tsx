@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ApiResult = {
   success: boolean;
@@ -10,7 +10,7 @@ type ApiResult = {
   extractedText?: string;
   extractionWarning?: string;
   analysis?: any;
-  generated?: any;
+  generated?: any | null;
   verification?: any;
   diagramSvg?: string | null;
   attempts?: any[];
@@ -20,8 +20,6 @@ type FilePreview = {
   url: string;
   kind: "image" | "pdf" | "document" | "unknown";
 };
-
-const sample = `한 변의 길이가 6cm인 정사각형의 넓이를 구하시오.`;
 
 function getFileKind(file: File): FilePreview["kind"] {
   const name = file.name.toLowerCase();
@@ -37,8 +35,19 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(2)}MB`;
 }
 
+function isScannedLikeFile(file: File | null) {
+  if (!file) return false;
+  const name = file.name.toLowerCase();
+  return file.type.startsWith("image/") || file.type === "application/pdf" || /\.(png|jpe?g|webp|pdf)$/.test(name);
+}
+
+function isActionableText(text: string) {
+  const compact = text.replace(/\s/g, "");
+  return compact.length >= 8 && /구하|계산|넓이|둘레|부피|정답|값|방정식|그래프|함수|분수|소수|확률|평균|각도|길이|비율|비례/.test(compact);
+}
+
 export default function Home() {
-  const [problemText, setProblemText] = useState(sample);
+  const [problemText, setProblemText] = useState("");
   const [imageContext, setImageContext] = useState("");
   const [confirmedText, setConfirmedText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -80,7 +89,9 @@ export default function Home() {
       method: "POST",
       body: formData
     });
-    return res.json() as Promise<ApiResult>;
+    const json = (await res.json()) as ApiResult;
+    if (!res.ok && !json.message) json.message = "요청 처리에 실패했습니다.";
+    return json;
   }
 
   async function extractAndConfirm() {
@@ -91,9 +102,7 @@ export default function Home() {
     try {
       const json = await requestApi(buildFormData("extract", problemText));
       setResult(json);
-      if (json.success && json.extractedText) {
-        setConfirmedText(json.extractedText);
-      }
+      setConfirmedText(json.extractedText || problemText || "");
     } catch (err) {
       setResult({ success: false, stage: "extracted", message: err instanceof Error ? err.message : "파일 인식 요청 실패" });
     } finally {
@@ -104,7 +113,7 @@ export default function Home() {
   async function generateFromConfirmed() {
     const sourceText = confirmedText.trim();
     if (!sourceText) {
-      setResult({ success: false, message: "확정된 문제 텍스트가 없습니다. 먼저 파일 인식 결과를 확인해 주세요." });
+      setResult({ success: false, stage: "generated", message: "확정된 문제 텍스트가 없습니다. 원본을 보고 문제 문장을 입력한 뒤 실행하세요." });
       return;
     }
 
@@ -122,21 +131,36 @@ export default function Home() {
 
   const generated = result?.generated?.new_problem;
   const busy = extracting || generating;
+  const scannedNeedsManualText = isScannedLikeFile(file) && !problemText.trim();
+  const canExtract = Boolean(file || problemText.trim());
+  const canGenerate = isActionableText(confirmedText);
+  const statusLabel = useMemo(() => {
+    if (!file && !problemText.trim()) return "대기: 파일 업로드 또는 문제 텍스트 입력 필요";
+    if (scannedNeedsManualText) return "주의: 무료 모드에서는 스캔/PDF OCR 불가. 문제 텍스트 직접 입력 필요";
+    if (confirmedText && canGenerate) return "준비됨: 확정 텍스트로 생성 가능";
+    if (confirmedText && !canGenerate) return "보류: 확정 텍스트가 문제 문장으로 부족함";
+    return "1단계 인식 결과 확인 필요";
+  }, [file, problemText, scannedNeedsManualText, confirmedText, canGenerate]);
 
   return (
     <main>
       <div className="version-banner">
-        2단계 실행 흐름 적용 · 원본 미리보기 → 파일 인식 → 인식 결과 수정·확정 → 문항 생성
+        실사용 보정 버전 · 무료 모드는 OCR 없이 사용자가 확정한 텍스트만 생성 · 미지원 유형은 생성 차단
       </div>
 
       <h1>수학 유사문항 생성 MVP</h1>
-      <p>파일을 업로드하면 먼저 원본을 확인하고, 파일 인식 결과를 수정·확정한 다음 그 텍스트로 유사문항을 생성합니다.</p>
+      <p>파일 원본을 먼저 확인하고, 실제 문제 문장을 사용자가 확정한 뒤에만 유사문항을 생성합니다.</p>
 
       <div className="step-panel">
         <span className="badge">1 원본 업로드</span>
-        <span className="badge">2 인식 결과 확인</span>
-        <span className="badge">3 텍스트 수정·확정</span>
-        <span className="badge">4 유사문항 생성</span>
+        <span className="badge">2 원본 확인</span>
+        <span className="badge">3 문제 텍스트 확정</span>
+        <span className="badge">4 지원 유형만 생성</span>
+      </div>
+
+      <div className="status-panel">
+        <strong>현재 상태</strong>
+        <p>{statusLabel}</p>
       </div>
 
       <div className="grid">
@@ -147,7 +171,9 @@ export default function Home() {
             accept="image/png,image/jpeg,image/webp,application/pdf,.png,.jpg,.jpeg,.webp,.pdf,.hwpx,.hwp"
             onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
           />
-          <p className="hint">무료 모드 권장: 텍스트 직접 입력, HWPX, HWP. 이미지/PDF 스캔본은 텍스트를 함께 입력하면 처리 정확도가 높아집니다. MVP 기준 10MB 이하.</p>
+          <p className="hint">
+            JPG/PNG/WEBP/PDF는 원본 미리보기용입니다. 결제 없는 무료 모드에서는 스캔 OCR을 하지 않으므로, 보이는 문제를 아래 텍스트 칸에 직접 입력해야 합니다. HWPX/HWP는 텍스트 추출을 시도합니다.
+          </p>
 
           {file && preview && (
             <div className="result-section upload-preview">
@@ -159,21 +185,14 @@ export default function Home() {
                 <button className="small-button" type="button" onClick={() => onFileChange(null)}>파일 제거</button>
               </div>
 
-              {preview.kind === "image" && (
-                <img src={preview.url} alt="업로드한 문제 이미지 미리보기" className="preview-image" />
-              )}
-
-              {preview.kind === "pdf" && (
-                <iframe src={preview.url} title="업로드한 PDF 미리보기" className="preview-frame" />
-              )}
-
+              {preview.kind === "image" && <img src={preview.url} alt="업로드한 문제 이미지 미리보기" className="preview-image" />}
+              {preview.kind === "pdf" && <iframe src={preview.url} title="업로드한 PDF 미리보기" className="preview-frame" />}
               {preview.kind === "document" && (
                 <div className="document-preview">
                   <strong>문서 파일이 선택되었습니다.</strong>
-                  <p>HWPX/HWP는 원본 레이아웃 대신 텍스트 추출 결과를 확인합니다. 아래 1단계 버튼을 눌러 인식 결과를 먼저 확인하세요.</p>
+                  <p>HWPX/HWP는 텍스트 추출 결과를 확인합니다. 추출이 불완전하면 아래 텍스트를 직접 보정하세요.</p>
                 </div>
               )}
-
               {preview.kind === "unknown" && (
                 <div className="document-preview">
                   <strong>미리보기를 지원하지 않는 파일입니다.</strong>
@@ -183,43 +202,49 @@ export default function Home() {
             </div>
           )}
 
-          <label>보조 입력 문제 텍스트</label>
+          <label>원본을 보고 문제 텍스트 입력</label>
           <textarea
             value={problemText}
             onChange={(e) => setProblemText(e.target.value)}
-            placeholder="무료 모드에서는 이 칸의 텍스트가 가장 중요합니다. 파일 인식이 부족하면 문제를 직접 붙여넣어 주세요."
+            placeholder="예: 한 변의 길이가 6cm인 정사각형의 넓이를 구하시오."
           />
 
-          <label>도형/이미지 보충 설명</label>
+          <label>도형/그래프 보충 설명</label>
           <textarea
             value={imageContext}
             onChange={(e) => setImageContext(e.target.value)}
-            placeholder="예: 좌표평면 위 점 A(1, 2), B(5, 2), C(5, 6)이 표시되어 있음"
+            placeholder="예: 좌표평면에 아래로 열린 포물선이 있고, 꼭짓점은 원점 O로 보임"
             style={{ minHeight: 120 }}
           />
 
-          <button onClick={extractAndConfirm} disabled={busy}>
-            {extracting ? "파일 인식 중..." : "1단계: 파일 인식 결과 확인"}
+          {scannedNeedsManualText && (
+            <p className="error">무료 모드에서는 이 PDF/이미지를 자동 OCR하지 않습니다. 미리보기를 보고 문제 문장을 직접 입력해야 합니다.</p>
+          )}
+
+          <button onClick={extractAndConfirm} disabled={busy || !canExtract}>
+            {extracting ? "인식 결과 준비 중..." : "1단계: 인식 결과 확인"}
           </button>
         </section>
 
         <section className="card">
-          <h2>파일 인식 및 생성 실행</h2>
-          {!result && <p>먼저 왼쪽에서 파일을 업로드하거나 문제 텍스트를 입력한 뒤, 1단계 버튼으로 인식 결과를 확인하세요.</p>}
+          <h2>인식 결과 및 생성 실행</h2>
+          {!result && <p>왼쪽에서 파일을 확인하고 문제 텍스트를 입력한 뒤 1단계 버튼을 누르세요.</p>}
           {result?.message && <p className={result.success ? "ok" : "error"}>{result.message}</p>}
           {result?.mode && <p className="badge">실행 모드: {result.mode === "local" ? "무료 로컬 모드" : "API 모드"}</p>}
           {result?.extractionWarning && <p className="hint">주의: {result.extractionWarning}</p>}
 
-          {result?.stage === "extracted" && (
+          {(result?.stage === "extracted" || confirmedText) && !generated && (
             <div className="result-section">
-              <h3>파일 인식 결과 확인·수정</h3>
-              <p className="hint">아래 텍스트를 실제 문제와 맞게 수정한 뒤 2단계 버튼을 누르세요. 이 텍스트가 최종 생성 기준이 됩니다.</p>
+              <h3>확정할 문제 텍스트</h3>
+              <p className="hint">이 칸의 텍스트가 최종 생성 기준입니다. 원본 미리보기와 비교해서 반드시 수정하세요.</p>
               <textarea
                 value={confirmedText}
                 onChange={(e) => setConfirmedText(e.target.value)}
                 className="confirmed-textarea"
+                placeholder="생성할 문제 문장을 여기에 확정하세요."
               />
-              <button onClick={generateFromConfirmed} disabled={busy || !confirmedText.trim()}>
+              {!canGenerate && confirmedText && <p className="error">문제 문장으로 보기 어렵습니다. “구하시오”, “계산하시오”, “넓이”, “방정식” 등 핵심 조건이 드러나게 수정하세요.</p>}
+              <button onClick={generateFromConfirmed} disabled={busy || !canGenerate}>
                 {generating ? "문항 생성 중..." : "2단계: 이 텍스트로 유사문항 생성"}
               </button>
             </div>
@@ -227,8 +252,20 @@ export default function Home() {
 
           {result?.extractedText && result.stage !== "extracted" && (
             <div className="result-section">
-              <h3>파일 인식 결과</h3>
+              <h3>사용한 인식/확정 텍스트</h3>
               <pre>{result.extractedText}</pre>
+            </div>
+          )}
+
+          {result?.verification?.fix_required && !generated && (
+            <div className="result-section blocked">
+              <h3>생성 보류</h3>
+              <p>{result.verification.fix_instructions}</p>
+              {result.verification.detected_errors?.length > 0 && (
+                <ul>
+                  {result.verification.detected_errors.map((item: string) => <li key={item}>{item}</li>)}
+                </ul>
+              )}
             </div>
           )}
 
@@ -240,12 +277,16 @@ export default function Home() {
                 <span className="badge">{generated.curriculum.domain}</span>
                 <span className="badge">난이도 {generated.difficulty}</span>
               </div>
-
-              <div className="result-section"><h3>문제</h3><p>{generated.question}</p></div>
+              <div className="result-section"><h3>생성 문제</h3><p>{generated.question}</p></div>
               <div className="result-section"><h3>정답</h3><p className="ok">{generated.answer}</p></div>
-              <div className="result-section"><h3>해설</h3><p>{generated.explanation}</p></div>
-
-              {result.diagramSvg && (
+              <div className="result-section"><h3>해설</h3><p style={{ whiteSpace: "pre-line" }}>{generated.explanation}</p></div>
+              {result?.verification && (
+                <div className="result-section">
+                  <h3>검수 결과</h3>
+                  <p>{result.verification.fix_instructions}</p>
+                </div>
+              )}
+              {result?.diagramSvg && (
                 <div className="result-section diagram">
                   <h3>SVG 도형</h3>
                   <div dangerouslySetInnerHTML={{ __html: result.diagramSvg }} />
