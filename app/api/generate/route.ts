@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { analyzeProblem, generateVariant, verifyProblem } from "@/lib/llm";
-import { renderDiagramSvg } from "@/lib/renderer";
-import { surfaceSimilarityRisk } from "@/lib/similarity";
+import { analyzeProblem, generateVariant, verifyProblem } from "../../../lib/llm";
+import { renderDiagramSvg } from "../../../lib/renderer";
+import { surfaceSimilarityRisk } from "../../../lib/similarity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
