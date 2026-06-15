@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { extractTextFromOfficeDocument } from "../../../lib/documentText";
 import { analyzeProblem, extractProblemFromFile, generateVariant, verifyProblem, type UploadedProblemFile } from "../../../lib/llm";
 import { renderDiagramSvg } from "../../../lib/renderer";
 import { surfaceSimilarityRisk } from "../../../lib/similarity";
@@ -26,25 +27,46 @@ function clampAttempts(value: unknown) {
   return Math.min(Math.max(Number.isFinite(parsed) ? parsed : 3, 1), 5);
 }
 
+function normalizeMimeType(file: File, lowerName: string) {
+  if (lowerName.endsWith(".pdf")) return "application/pdf";
+  if (lowerName.endsWith(".hwpx")) return "application/hwpx+zip";
+  if (lowerName.endsWith(".hwp")) return "application/x-hwp";
+  return file.type || "application/octet-stream";
+}
+
 async function fileToUploadedProblemFile(file: File): Promise<UploadedProblemFile> {
   if (file.size > MAX_UPLOAD_BYTES) {
-    throw new Error("업로드 파일은 10MB 이하만 지원합니다. 큰 PDF는 한 문제 단위로 캡처해서 올려 주세요.");
+    throw new Error("업로드 파일은 10MB 이하만 지원합니다.");
   }
 
-  const mimeType = file.type || "application/octet-stream";
-  const isPdf = mimeType === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  const lowerName = file.name.toLowerCase();
+  const mimeType = normalizeMimeType(file, lowerName);
+  const isPdf = mimeType === "application/pdf" || lowerName.endsWith(".pdf");
   const isImage = mimeType.startsWith("image/");
+  const isHwpx = lowerName.endsWith(".hwpx");
+  const isHwp = lowerName.endsWith(".hwp");
 
-  if (!isPdf && !isImage) {
-    throw new Error("지원 파일 형식은 PDF, JPG, PNG, WEBP입니다.");
+  if (!isPdf && !isImage && !isHwpx && !isHwp) {
+    throw new Error("지원 파일 형식은 PDF, JPG, PNG, WEBP, HWPX, HWP입니다.");
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  return {
-    filename: file.name || (isPdf ? "problem.pdf" : "problem-image.png"),
+  const uploaded: UploadedProblemFile = {
+    filename: file.name || "problem-file",
     mimeType,
     dataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`
   };
+
+  if (isHwpx || isHwp) {
+    const extracted = await extractTextFromOfficeDocument(file.name, buffer);
+    if (!extracted?.text) {
+      throw new Error("HWP/HWPX 파일에서 텍스트를 추출하지 못했습니다. PDF나 이미지로 변환해 업로드해 주세요.");
+    }
+    uploaded.extractedText = extracted.text;
+    uploaded.extractionWarning = extracted.warning;
+  }
+
+  return uploaded;
 }
 
 async function parseRequest(req: Request): Promise<ParsedRequest> {
@@ -86,16 +108,12 @@ export async function POST(req: Request) {
 
     if (parsed.file) {
       extractedText = await extractProblemFromFile(parsed.file);
-      problemText = problemText
-        ? `${problemText}\n\n[업로드 파일 인식 결과]\n${extractedText}`
-        : extractedText;
-      imageContext = imageContext
-        ? `${imageContext}\n\n[업로드 파일 인식 결과]\n${extractedText}`
-        : extractedText;
+      problemText = problemText ? `${problemText}\n\n[업로드 파일 인식 결과]\n${extractedText}` : extractedText;
+      imageContext = imageContext ? `${imageContext}\n\n[업로드 파일 인식 결과]\n${extractedText}` : extractedText;
     }
 
     if (!problemText) {
-      return NextResponse.json({ success: false, message: "문제 텍스트를 입력하거나 이미지/PDF 파일을 업로드해 주세요." }, { status: 400 });
+      return NextResponse.json({ success: false, message: "문제 텍스트를 입력하거나 파일을 업로드해 주세요." }, { status: 400 });
     }
 
     const maxAttempts = parsed.maxAttempts;
@@ -112,15 +130,7 @@ export async function POST(req: Request) {
       attempts.push({ index: i + 1, valid, localSimilarityRisk, modelSimilarityRisk: generated.similarity_check.surface_similarity_risk, verification });
 
       if (valid) {
-        return NextResponse.json({
-          success: true,
-          extractedText,
-          analysis,
-          generated,
-          verification,
-          diagramSvg: renderDiagramSvg(generated.diagram_spec),
-          attempts
-        });
+        return NextResponse.json({ success: true, extractedText, analysis, generated, verification, diagramSvg: renderDiagramSvg(generated.diagram_spec), attempts });
       }
     }
 
