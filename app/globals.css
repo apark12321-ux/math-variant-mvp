@@ -1,0 +1,34 @@
+:root {
+  --bg: #0b1020;
+  --panel: #11182c;
+  --text: #eef2ff;
+  --muted: #aab4d4;
+  --line: #2b365a;
+  --accent: #7aa2ff;
+  --danger: #ff8a8a;
+  --ok: #8affc1;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: radial-gradient(circle at top left, #1a2550 0, var(--bg) 40%, #070b16 100%);
+  color: var(--text);
+  font-family: Arial, "Noto Sans KR", sans-serif;
+}
+main { max-width: 1180px; margin: 0 auto; padding: 40px 20px; }
+h1 { margin: 0 0 10px; font-size: 34px; letter-spacing: -0.04em; }
+p { color: var(--muted); line-height: 1.7; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.card { background: rgba(17, 24, 44, .82); border: 1px solid var(--line); border-radius: 18px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.22); }
+textarea, input, select { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: #080d1c; color: var(--text); padding: 12px; font-size: 15px; }
+textarea { min-height: 260px; resize: vertical; line-height: 1.55; }
+label { display: block; margin: 14px 0 8px; font-weight: 700; color: #dbe4ff; }
+button { margin-top: 16px; width: 100%; border: 0; border-radius: 12px; padding: 14px 18px; background: linear-gradient(135deg, #7aa2ff, #a67aff); color: white; font-weight: 800; cursor: pointer; font-size: 16px; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+pre { white-space: pre-wrap; word-break: break-word; background: #080d1c; border: 1px solid var(--line); border-radius: 12px; padding: 14px; color: #dbe4ff; line-height: 1.5; }
+.badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); color: #dbe4ff; border-radius: 999px; padding: 6px 10px; margin: 4px 6px 4px 0; font-size: 13px; }
+.result-section { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
+.diagram svg { max-width: 100%; height: auto; background: white; border-radius: 12px; }
+.error { color: var(--danger); }
+.ok { color: var(--ok); }
+@media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
