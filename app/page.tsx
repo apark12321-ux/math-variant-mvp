@@ -51,21 +51,21 @@ export default function Home() {
   return (
     <main>
       <div className="version-banner">
-        파일 업로드 입력 지원 버전 · JPG/PNG/WEBP/PDF 인식 가능
+        파일 업로드 입력 지원 버전 · JPG/PNG/WEBP/PDF/HWPX/HWP 인식 가능
       </div>
 
       <h1>수학 유사문항 생성 MVP</h1>
-      <p>문제 텍스트, 이미지 캡처, 스캔 이미지, PDF를 입력하면 OCR·시각 인식 후 새 문항과 해설을 생성합니다.</p>
+      <p>문제 텍스트, 이미지 캡처, 스캔 이미지, PDF, HWPX, HWP 파일을 입력하면 OCR·문서 인식 후 새 문항과 해설을 생성합니다.</p>
 
       <div className="grid">
         <section className="card">
           <label>문제 파일 업로드</label>
           <input
             type="file"
-            accept="image/png,image/jpeg,image/webp,application/pdf,.png,.jpg,.jpeg,.webp,.pdf"
+            accept="image/png,image/jpeg,image/webp,application/pdf,.png,.jpg,.jpeg,.webp,.pdf,.hwpx,.hwp"
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
-          <p className="hint">지원: JPG, PNG, WEBP, PDF. 한 번에 한 문제가 보이는 선명한 파일을 권장합니다. MVP 기준 10MB 이하.</p>
+          <p className="hint">지원: JPG, PNG, WEBP, PDF, HWPX, HWP. HWP는 제한적 추출이므로 가능하면 HWPX/PDF/이미지를 권장합니다. MVP 기준 10MB 이하.</p>
           {file && <p className="ok">선택됨: {file.name} / {(file.size / 1024 / 1024).toFixed(2)}MB</p>}
 
           <label>입력 문제 텍스트</label>
