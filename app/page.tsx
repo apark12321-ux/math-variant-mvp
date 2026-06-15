@@ -4,6 +4,7 @@ import { useState } from "react";
 
 type ApiResult = {
   success: boolean;
+  mode?: "local" | "api";
   message?: string;
   extractedText?: string;
   analysis?: any;
@@ -51,11 +52,11 @@ export default function Home() {
   return (
     <main>
       <div className="version-banner">
-        파일 업로드 입력 지원 버전 · JPG/PNG/WEBP/PDF/HWPX/HWP 인식 가능
+        무료 로컬 모드 기본 적용 · 결제 없이 텍스트/HWPX/HWP 추출 문항 생성 가능
       </div>
 
       <h1>수학 유사문항 생성 MVP</h1>
-      <p>문제 텍스트, 이미지 캡처, 스캔 이미지, PDF, HWPX, HWP 파일을 입력하면 OCR·문서 인식 후 새 문항과 해설을 생성합니다.</p>
+      <p>문제 텍스트, HWPX, HWP 파일은 무료 로컬 규칙 기반으로 생성합니다. 이미지 캡처, 스캔 이미지, PDF OCR은 정확한 인식을 위해 별도 API 모드가 필요할 수 있습니다.</p>
 
       <div className="grid">
         <section className="card">
@@ -65,14 +66,14 @@ export default function Home() {
             accept="image/png,image/jpeg,image/webp,application/pdf,.png,.jpg,.jpeg,.webp,.pdf,.hwpx,.hwp"
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
-          <p className="hint">지원: JPG, PNG, WEBP, PDF, HWPX, HWP. HWP는 제한적 추출이므로 가능하면 HWPX/PDF/이미지를 권장합니다. MVP 기준 10MB 이하.</p>
+          <p className="hint">무료 모드 권장: 텍스트 직접 입력, HWPX, HWP. 이미지/PDF 스캔본은 텍스트를 함께 입력하면 처리 가능합니다. MVP 기준 10MB 이하.</p>
           {file && <p className="ok">선택됨: {file.name} / {(file.size / 1024 / 1024).toFixed(2)}MB</p>}
 
           <label>입력 문제 텍스트</label>
           <textarea
             value={problemText}
             onChange={(e) => setProblemText(e.target.value)}
-            placeholder="파일만 업로드해도 됩니다. 텍스트를 함께 입력하면 보정 정보로 사용됩니다."
+            placeholder="무료 모드에서는 이 칸의 텍스트가 가장 중요합니다. 파일 인식이 부족하면 문제를 직접 붙여넣어 주세요."
           />
 
           <label>도형/이미지 보충 설명</label>
@@ -83,13 +84,14 @@ export default function Home() {
             style={{ minHeight: 120 }}
           />
 
-          <button onClick={submit} disabled={loading}>{loading ? "파일 인식·생성·검증 중..." : "문항 생성"}</button>
+          <button onClick={submit} disabled={loading}>{loading ? "처리 중..." : "문항 생성"}</button>
         </section>
 
         <section className="card">
           <h2>생성 결과</h2>
           {!result && <p>문제 텍스트를 입력하거나 파일을 업로드한 뒤 생성 버튼을 누르세요.</p>}
-          {result && !result.success && <p className="error">{result.message ?? "생성 실패"}</p>}
+          {result?.message && <p className={result.success ? "ok" : "error"}>{result.message}</p>}
+          {result?.mode && <p className="badge">실행 모드: {result.mode === "local" ? "무료 로컬 모드" : "API 모드"}</p>}
 
           {result?.extractedText && (
             <div className="result-section">
