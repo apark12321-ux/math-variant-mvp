@@ -13,6 +13,7 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "jszip": "^3.10.1",
     "next": "latest",
     "openai": "latest",
     "react": "latest",
