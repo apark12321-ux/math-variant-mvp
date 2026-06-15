@@ -13,6 +13,8 @@ export type UploadedProblemFile = {
   filename: string;
   mimeType: string;
   dataUrl: string;
+  extractedText?: string;
+  extractionWarning?: string;
 };
 
 function client() {
@@ -70,12 +72,37 @@ async function callJson<T>({
   }
 }
 
+async function cleanExtractedDocumentText(file: UploadedProblemFile): Promise<string> {
+  const completion = await client().chat.completions.create({
+    model: model(),
+    messages: [
+      {
+        role: "system",
+        content: "너는 한국 수학 문제 문서 정리 도우미다. 사용자가 제공한 HWP/HWPX 추출 텍스트에서 1번 문제 또는 가장 먼저 등장하는 수학 문제를 정리한다. 없는 내용을 만들지 말고, 수식·보기·조건·단위·도형 설명을 최대한 보존한다."
+      },
+      {
+        role: "user",
+        content: `파일명: ${file.filename}\n${file.extractionWarning ? `주의: ${file.extractionWarning}\n` : ""}\n\n추출 텍스트:\n${file.extractedText ?? ""}`
+      }
+    ],
+    temperature: 0.1
+  });
+
+  const output = completion.choices[0]?.message?.content?.trim();
+  return output || file.extractedText || "";
+}
+
 export async function extractProblemFromFile(file: UploadedProblemFile): Promise<string> {
+  if (file.extractedText) {
+    const cleaned = await cleanExtractedDocumentText(file);
+    return [file.extractionWarning ? `[주의] ${file.extractionWarning}` : "", cleaned].filter(Boolean).join("\n\n");
+  }
+
   const isPdf = file.mimeType === "application/pdf" || file.filename.toLowerCase().endsWith(".pdf");
   const isImage = file.mimeType.startsWith("image/");
 
   if (!isPdf && !isImage) {
-    throw new Error("지원하지 않는 파일 형식입니다. PDF, JPG, PNG, WEBP 이미지만 업로드해 주세요.");
+    throw new Error("지원하지 않는 파일 형식입니다. PDF, JPG, PNG, WEBP, HWPX, HWP 파일을 업로드해 주세요.");
   }
 
   const filePart = isPdf
