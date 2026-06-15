@@ -34,6 +34,8 @@ pre { white-space: pre-wrap; word-break: break-word; background: #080d1c; border
 .ok { color: var(--ok); }
 .hint { margin-top: 8px; font-size: 13px; color: var(--muted); }
 .version-banner { border: 1px solid rgba(122,162,255,.5); background: rgba(122,162,255,.12); color: #dbe4ff; border-radius: 999px; display: inline-flex; padding: 8px 14px; margin-bottom: 18px; font-size: 13px; font-weight: 700; }
+.step-panel { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 20px; padding: 12px; border: 1px solid rgba(122,162,255,.28); background: rgba(8,13,28,.52); border-radius: 16px; }
+.confirmed-textarea { min-height: 260px; border-color: rgba(138,255,193,.5); }
 .upload-preview { border-top-style: dashed; }
 .preview-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
 .preview-header h3 { margin: 0 0 4px; }
