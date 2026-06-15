@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MIN_CONFIRMED_TEXT_LENGTH = 8;
 
 type RequestAction = "extract" | "generate";
 
@@ -36,11 +37,20 @@ function parseAction(value: unknown): RequestAction {
   return value === "extract" ? "extract" : "generate";
 }
 
+function normalizeText(text: string) {
+  return text.replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function normalizeMimeType(file: File, lowerName: string) {
   if (lowerName.endsWith(".pdf")) return "application/pdf";
   if (lowerName.endsWith(".hwpx")) return "application/hwpx+zip";
   if (lowerName.endsWith(".hwp")) return "application/x-hwp";
   return file.type || "application/octet-stream";
+}
+
+function isImageOrPdf(file?: UploadedProblemFile) {
+  if (!file) return false;
+  return file.mimeType.startsWith("image/") || file.mimeType === "application/pdf" || file.filename.toLowerCase().endsWith(".pdf");
 }
 
 async function fileToUploadedProblemFile(file: File): Promise<UploadedProblemFile> {
@@ -69,9 +79,9 @@ async function fileToUploadedProblemFile(file: File): Promise<UploadedProblemFil
   if (isHwpx || isHwp) {
     const extracted = await extractTextFromOfficeDocument(file.name, buffer);
     if (!extracted?.text) {
-      throw new Error("HWP/HWPX 파일에서 텍스트를 추출하지 못했습니다. PDF나 이미지로 변환해 업로드해 주세요.");
+      throw new Error("HWP/HWPX 파일에서 텍스트를 추출하지 못했습니다. HWPX로 다시 저장하거나 텍스트를 직접 입력해 주세요.");
     }
-    uploaded.extractedText = extracted.text;
+    uploaded.extractedText = normalizeText(extracted.text);
     uploaded.extractionWarning = extracted.warning;
   }
 
@@ -84,8 +94,8 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
   if (contentType.includes("multipart/form-data")) {
     const form = await req.formData();
     const action = parseAction(form.get("action"));
-    const problemText = String(form.get("problemText") ?? "").trim();
-    const imageContext = String(form.get("imageContext") ?? "").trim();
+    const problemText = normalizeText(String(form.get("problemText") ?? ""));
+    const imageContext = normalizeText(String(form.get("imageContext") ?? ""));
     const maxAttempts = clampAttempts(form.get("maxAttempts"));
     const fileValue = form.get("file");
 
@@ -100,73 +110,98 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
   const body = (await req.json()) as GenerateRequest;
   return {
     action: parseAction(body.action),
-    problemText: body.problemText?.trim() ?? "",
-    imageContext: body.imageContext?.trim() ?? "",
+    problemText: normalizeText(body.problemText ?? ""),
+    imageContext: normalizeText(body.imageContext ?? ""),
     maxAttempts: clampAttempts(body.maxAttempts)
   };
 }
 
-function buildLocalText(parsed: ParsedRequest) {
+function buildConfirmedText(parsed: ParsedRequest) {
   const parts = [parsed.problemText, parsed.imageContext, parsed.file?.extractedText].filter(Boolean);
-  return parts.join("\n\n").trim();
+  return normalizeText(parts.join("\n\n"));
+}
+
+function textLooksActionable(text: string) {
+  const compact = text.replace(/\s/g, "");
+  if (compact.length < MIN_CONFIRMED_TEXT_LENGTH) return false;
+  return /구하|계산|넓이|둘레|부피|정답|값|풀이|방정식|그래프|함수|분수|소수|확률|평균|각도|길이|비율|비례/.test(compact);
 }
 
 function localResponse(problemText: string, extractedText = "") {
   const local = generateLocalVariant(problemText);
-  return NextResponse.json({
-    success: true,
-    mode: "local",
-    stage: "generated",
-    message: "로컬 규칙 기반 무료 모드로 생성했습니다. 복잡한 문항은 품질이 낮을 수 있습니다.",
-    extractedText,
-    analysis: local.analysis,
-    generated: local.generated,
-    verification: local.verification,
-    diagramSvg: renderDiagramSvg(local.generated.diagram_spec),
-    attempts: [{ index: 1, valid: true, localSimilarityRisk: "medium", modelSimilarityRisk: "medium", verification: local.verification }]
-  });
+  const valid = local.verification.is_valid && local.verification.answer_matches;
+
+  return NextResponse.json(
+    {
+      success: valid,
+      mode: "local",
+      stage: "generated",
+      message: valid
+        ? "로컬 규칙 기반 무료 모드로 생성했습니다."
+        : "무료 로컬 모드에서 이 문항 유형은 아직 생성할 수 없습니다. 임의의 가짜 문항은 생성하지 않았습니다.",
+      extractedText,
+      analysis: local.analysis,
+      generated: valid ? local.generated : null,
+      verification: local.verification,
+      diagramSvg: valid ? renderDiagramSvg(local.generated.diagram_spec) : null,
+      attempts: [
+        {
+          index: 1,
+          valid,
+          localSimilarityRisk: valid ? "medium" : "blocked",
+          modelSimilarityRisk: valid ? "medium" : "blocked",
+          verification: local.verification
+        }
+      ]
+    },
+    { status: valid ? 200 : 422 }
+  );
 }
 
 async function extractionResponse(parsed: ParsedRequest, apiEnabled: boolean) {
   let extractedText = parsed.file?.extractedText ?? "";
-  const extractionWarning = parsed.file?.extractionWarning ?? "";
+  let extractionWarning = parsed.file?.extractionWarning ?? "";
 
   if (parsed.file && !extractedText) {
     if (!apiEnabled) {
-      extractedText = buildLocalText(parsed);
-      if (!extractedText) {
-        return NextResponse.json(
-          {
-            success: false,
-            mode: "local",
-            stage: "extracted",
-            message: "무료 모드에서는 이미지/PDF OCR을 직접 수행할 수 없습니다. 문제 텍스트를 입력창에 붙여넣거나 HWPX/HWP 텍스트 문서를 업로드해 주세요.",
-            extractedText: ""
-          },
-          { status: 400 }
-        );
+      if (isImageOrPdf(parsed.file)) {
+        extractionWarning = "무료 모드에서는 스캔 이미지/PDF OCR을 수행하지 않습니다. 왼쪽 미리보기를 보고 문제 텍스트를 직접 입력·수정해야 합니다.";
       }
+      extractedText = buildConfirmedText(parsed);
     } else {
-      extractedText = await extractProblemFromFile(parsed.file);
+      extractedText = normalizeText(await extractProblemFromFile(parsed.file));
     }
   }
 
   if (!extractedText) {
-    extractedText = buildLocalText(parsed);
+    extractedText = buildConfirmedText(parsed);
   }
 
   if (!extractedText) {
-    return NextResponse.json({ success: false, stage: "extracted", message: "확인할 문제 텍스트가 없습니다. 파일을 업로드하거나 문제를 직접 입력해 주세요." }, { status: 400 });
+    return NextResponse.json(
+      {
+        success: false,
+        mode: apiEnabled ? "api" : "local",
+        stage: "extracted",
+        message: "인식된 텍스트가 없습니다. 무료 모드에서는 PDF/이미지 원본을 보고 문제 텍스트를 직접 입력해야 합니다.",
+        extractedText: "",
+        extractionWarning: extractionWarning || "텍스트 없음"
+      },
+      { status: 400 }
+    );
   }
 
+  const actionable = textLooksActionable(extractedText);
   return NextResponse.json({
-    success: true,
+    success: actionable,
     mode: apiEnabled ? "api" : "local",
     stage: "extracted",
-    message: "파일 인식 결과가 준비되었습니다. 아래 텍스트를 확인·수정한 뒤 '이 텍스트로 유사문항 생성'을 실행하세요.",
+    message: actionable
+      ? "인식 결과가 준비되었습니다. 실제 원본과 비교해 수정한 뒤 2단계 생성을 실행하세요."
+      : "인식 결과가 너무 짧거나 문제 문장으로 보기 어렵습니다. 원본을 보며 텍스트를 수정해야 합니다.",
     extractedText,
     extractionWarning
-  });
+  }, { status: actionable ? 200 : 422 });
 }
 
 export async function POST(req: Request) {
@@ -179,9 +214,18 @@ export async function POST(req: Request) {
     }
 
     if (!apiEnabled) {
-      const localText = buildLocalText(parsed);
-      if (!localText) {
-        return NextResponse.json({ success: false, message: "무료 모드에서는 텍스트 입력 또는 HWPX/HWP 추출 텍스트가 필요합니다. 이미지/PDF OCR은 API 모드에서 처리됩니다." }, { status: 400 });
+      const localText = buildConfirmedText(parsed);
+      if (!localText || !textLooksActionable(localText)) {
+        return NextResponse.json(
+          {
+            success: false,
+            mode: "local",
+            stage: "generated",
+            message: "생성할 수 있는 확정 문제 텍스트가 아닙니다. PDF/이미지를 보고 문제 문장을 정확히 입력한 뒤 다시 실행하세요.",
+            extractedText: localText
+          },
+          { status: 422 }
+        );
       }
       return localResponse(localText, parsed.file?.extractedText ?? parsed.problemText);
     }
@@ -191,13 +235,14 @@ export async function POST(req: Request) {
     let extractedText = "";
 
     if (parsed.file) {
-      extractedText = await extractProblemFromFile(parsed.file);
+      extractedText = normalizeText(await extractProblemFromFile(parsed.file));
       problemText = problemText ? `${problemText}\n\n[업로드 파일 인식 결과]\n${extractedText}` : extractedText;
       imageContext = imageContext ? `${imageContext}\n\n[업로드 파일 인식 결과]\n${extractedText}` : extractedText;
     }
 
-    if (!problemText) {
-      return NextResponse.json({ success: false, message: "문제 텍스트를 입력하거나 파일을 업로드해 주세요." }, { status: 400 });
+    problemText = normalizeText(problemText);
+    if (!problemText || !textLooksActionable(problemText)) {
+      return NextResponse.json({ success: false, mode: "api", stage: "generated", message: "문제 텍스트를 충분히 인식하지 못했습니다. 인식 결과를 수정한 뒤 다시 실행하세요.", extractedText }, { status: 422 });
     }
 
     const maxAttempts = parsed.maxAttempts;
@@ -218,7 +263,7 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ success: false, message: "검증을 통과한 문항을 생성하지 못했습니다.", extractedText, analysis, attempts }, { status: 422 });
+    return NextResponse.json({ success: false, mode: "api", stage: "generated", message: "검증을 통과한 문항을 생성하지 못했습니다.", extractedText, analysis, attempts }, { status: 422 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "알 수 없는 오류";
     return NextResponse.json({ success: false, message }, { status: 500 });
