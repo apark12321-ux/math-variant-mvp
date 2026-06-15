@@ -1,0 +1,33 @@
+{
+  "note": "샘플 교육과정 매핑 파일입니다. 실제 서비스에서는 NCIC/교육부 기준으로 단원·성취기준 DB를 확장하세요.",
+  "items": [
+    {
+      "school_level": "elementary",
+      "grade": 5,
+      "domain": "측정",
+      "unit": "평면도형의 넓이",
+      "achievement_standard": "평면도형의 넓이를 구하는 방법을 이해하고 구할 수 있다."
+    },
+    {
+      "school_level": "middle",
+      "grade": 1,
+      "domain": "문자와 식",
+      "unit": "일차방정식",
+      "achievement_standard": "일차방정식을 풀고 이를 활용하여 문제를 해결할 수 있다."
+    },
+    {
+      "school_level": "middle",
+      "grade": 2,
+      "domain": "함수",
+      "unit": "일차함수",
+      "achievement_standard": "일차함수의 그래프와 성질을 이해한다."
+    },
+    {
+      "school_level": "high",
+      "grade": 1,
+      "domain": "대수",
+      "unit": "이차함수의 그래프",
+      "achievement_standard": "이차함수의 그래프의 꼭짓점과 축을 이해한다."
+    }
+  ]
+}
