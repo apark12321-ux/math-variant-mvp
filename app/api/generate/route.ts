@@ -10,13 +10,17 @@ export const dynamic = "force-dynamic";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
+type RequestAction = "extract" | "generate";
+
 type GenerateRequest = {
+  action?: RequestAction;
   problemText?: string;
   imageContext?: string;
   maxAttempts?: number;
 };
 
 type ParsedRequest = {
+  action: RequestAction;
   problemText: string;
   imageContext: string;
   maxAttempts: number;
@@ -26,6 +30,10 @@ type ParsedRequest = {
 function clampAttempts(value: unknown) {
   const parsed = typeof value === "string" ? Number(value) : typeof value === "number" ? value : 3;
   return Math.min(Math.max(Number.isFinite(parsed) ? parsed : 3, 1), 5);
+}
+
+function parseAction(value: unknown): RequestAction {
+  return value === "extract" ? "extract" : "generate";
 }
 
 function normalizeMimeType(file: File, lowerName: string) {
@@ -75,12 +83,13 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
 
   if (contentType.includes("multipart/form-data")) {
     const form = await req.formData();
+    const action = parseAction(form.get("action"));
     const problemText = String(form.get("problemText") ?? "").trim();
     const imageContext = String(form.get("imageContext") ?? "").trim();
     const maxAttempts = clampAttempts(form.get("maxAttempts"));
     const fileValue = form.get("file");
 
-    const parsed: ParsedRequest = { problemText, imageContext, maxAttempts };
+    const parsed: ParsedRequest = { action, problemText, imageContext, maxAttempts };
     if (fileValue instanceof File && fileValue.size > 0) {
       parsed.file = await fileToUploadedProblemFile(fileValue);
     }
@@ -90,6 +99,7 @@ async function parseRequest(req: Request): Promise<ParsedRequest> {
 
   const body = (await req.json()) as GenerateRequest;
   return {
+    action: parseAction(body.action),
     problemText: body.problemText?.trim() ?? "",
     imageContext: body.imageContext?.trim() ?? "",
     maxAttempts: clampAttempts(body.maxAttempts)
@@ -106,6 +116,7 @@ function localResponse(problemText: string, extractedText = "") {
   return NextResponse.json({
     success: true,
     mode: "local",
+    stage: "generated",
     message: "로컬 규칙 기반 무료 모드로 생성했습니다. 복잡한 문항은 품질이 낮을 수 있습니다.",
     extractedText,
     analysis: local.analysis,
@@ -116,17 +127,63 @@ function localResponse(problemText: string, extractedText = "") {
   });
 }
 
+async function extractionResponse(parsed: ParsedRequest, apiEnabled: boolean) {
+  let extractedText = parsed.file?.extractedText ?? "";
+  const extractionWarning = parsed.file?.extractionWarning ?? "";
+
+  if (parsed.file && !extractedText) {
+    if (!apiEnabled) {
+      extractedText = buildLocalText(parsed);
+      if (!extractedText) {
+        return NextResponse.json(
+          {
+            success: false,
+            mode: "local",
+            stage: "extracted",
+            message: "무료 모드에서는 이미지/PDF OCR을 직접 수행할 수 없습니다. 문제 텍스트를 입력창에 붙여넣거나 HWPX/HWP 텍스트 문서를 업로드해 주세요.",
+            extractedText: ""
+          },
+          { status: 400 }
+        );
+      }
+    } else {
+      extractedText = await extractProblemFromFile(parsed.file);
+    }
+  }
+
+  if (!extractedText) {
+    extractedText = buildLocalText(parsed);
+  }
+
+  if (!extractedText) {
+    return NextResponse.json({ success: false, stage: "extracted", message: "확인할 문제 텍스트가 없습니다. 파일을 업로드하거나 문제를 직접 입력해 주세요." }, { status: 400 });
+  }
+
+  return NextResponse.json({
+    success: true,
+    mode: apiEnabled ? "api" : "local",
+    stage: "extracted",
+    message: "파일 인식 결과가 준비되었습니다. 아래 텍스트를 확인·수정한 뒤 '이 텍스트로 유사문항 생성'을 실행하세요.",
+    extractedText,
+    extractionWarning
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const parsed = await parseRequest(req);
     const apiEnabled = process.env.USE_OPENAI === "true" && !!process.env.OPENAI_API_KEY;
+
+    if (parsed.action === "extract") {
+      return extractionResponse(parsed, apiEnabled);
+    }
 
     if (!apiEnabled) {
       const localText = buildLocalText(parsed);
       if (!localText) {
         return NextResponse.json({ success: false, message: "무료 모드에서는 텍스트 입력 또는 HWPX/HWP 추출 텍스트가 필요합니다. 이미지/PDF OCR은 API 모드에서 처리됩니다." }, { status: 400 });
       }
-      return localResponse(localText, parsed.file?.extractedText ?? "");
+      return localResponse(localText, parsed.file?.extractedText ?? parsed.problemText);
     }
 
     let problemText = parsed.problemText;
@@ -157,7 +214,7 @@ export async function POST(req: Request) {
       attempts.push({ index: i + 1, valid, localSimilarityRisk, modelSimilarityRisk: generated.similarity_check.surface_similarity_risk, verification });
 
       if (valid) {
-        return NextResponse.json({ success: true, mode: "api", extractedText, analysis, generated, verification, diagramSvg: renderDiagramSvg(generated.diagram_spec), attempts });
+        return NextResponse.json({ success: true, mode: "api", stage: "generated", extractedText, analysis, generated, verification, diagramSvg: renderDiagramSvg(generated.diagram_spec), attempts });
       }
     }
 
