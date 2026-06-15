@@ -50,6 +50,10 @@ export default function Home() {
 
   return (
     <main>
+      <div className="version-banner">
+        파일 업로드 입력 지원 버전 · JPG/PNG/WEBP/PDF 인식 가능
+      </div>
+
       <h1>수학 유사문항 생성 MVP</h1>
       <p>문제 텍스트, 이미지 캡처, 스캔 이미지, PDF를 입력하면 OCR·시각 인식 후 새 문항과 해설을 생성합니다.</p>
 
